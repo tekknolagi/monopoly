@@ -1,21 +1,24 @@
+use std::convert::TryInto;
+use std::error::Error;
+use std::fmt;
 // Derived from https://www.hasbro.com/common/instruct/00009.pdf
 
-#[derive(Clone)]
-pub struct PlayerId(i8);
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct PlayerId(pub i8);
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Player {
-    id: PlayerId,
+    pub id: PlayerId,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PropertyId(i8);
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Money(i16);
 
-#[derive(Clone)]
-struct Property {
+#[derive(Clone, Debug, PartialEq)]
+pub struct Property {
     name: &'static str,
     base: Money,
     houses: [Money; 4],
@@ -26,35 +29,40 @@ struct Property {
                              // TODO(emacs): double rent if player owns all lots on color?
 }
 
-#[derive(Clone)]
-struct RollResult(i8, i8);
+#[derive(Clone, Debug, PartialEq)]
+pub struct RollResult(pub i8, pub i8);
 
-#[derive(Clone)]
-struct ChanceCard;
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChanceCard;
 
-#[derive(Clone)]
-struct CommunityChestCard;
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommunityChestCard;
 
-enum Card {
+#[derive(Clone, Debug, PartialEq)]
+pub enum Card {
     Chance(ChanceCard),
     CommunityChest(CommunityChestCard),
 }
 
-struct Bid(PlayerId, Money);
+#[derive(Clone, Debug, PartialEq)]
+pub struct Bid(PlayerId, Money);
 
-enum TransactionType {
+#[derive(Clone, Debug, PartialEq)]
+pub enum TransactionType {
     BuyProperty(PlayerId, PropertyId),
     BuyGetOutOfJailFreeCard(PlayerId),
     SellProperty(PlayerId, PropertyId),
     PayRent(PlayerId),
 }
 
-struct Transaction {
+#[derive(Clone, Debug, PartialEq)]
+pub struct Transaction {
     ty: TransactionType,
     cost: Money,
 }
 
-enum Action {
+#[derive(Clone, Debug, PartialEq)]
+pub enum Action {
     RollDice(PlayerId, RollResult),
     MoveForward(PlayerId, i8),
     BuyProperty(PlayerId, PropertyId),  // from the bank
@@ -75,7 +83,7 @@ enum Action {
     DeclareBankruptcy(PlayerId),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum Square {
     Go,
     Property(Property),
@@ -94,36 +102,100 @@ static SQUARES: &'static [Square] = &[
     }),
 ];
 
-pub struct Board {
+#[derive(Clone)]
+pub struct GameState {
     squares: Vec<Square>,
+    players: Vec<Player>,
+    events: Vec<Action>,
 }
 
-impl Default for Board {
-    fn default() -> Self {
-        Board {
-            squares: SQUARES.to_vec(),
+impl fmt::Debug for GameState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GameState")
+            .field("players", &self.players)
+            .field("events", &self.events)
+            .finish()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StateError {
+    message: String,
+}
+
+impl StateError {
+    pub fn new(message: &str) -> Self {
+        StateError {
+            message: message.to_string(),
         }
     }
 }
 
-pub struct Game {
-    board: Board,
-    players: Vec<Player>,
+impl Error for StateError {
+    fn description(&self) -> &str {
+        &self.message
+    }
 }
 
-impl Game {
-    pub fn init() -> Game {
-        Game {
-            board: Board::default(),
+impl fmt::Display for StateError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl GameState {
+    pub fn init() -> GameState {
+        GameState {
+            squares: SQUARES.to_vec(),
             players: Vec::new(),
+            events: Vec::new(),
+        }
+    }
+
+    fn ensure_player(&self, player_id: i8) -> Result<(), StateError> {
+        if player_id >= self.players.len().try_into().unwrap() {
+            Err(StateError::new(
+                format!("player {:?} is not a valid player", player_id).as_str(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn apply(&mut self, action: Action) -> Result<(), StateError> {
+        match action {
+            Action::RollDice(PlayerId(id), RollResult(one, two)) => {
+                self.ensure_player(id)?;
+                println!("player {:?} rolled {:?}", id, one + two);
+                self.events.push(action);
+                Ok(())
+            }
+            _ => Err(StateError::new("foo")),
         }
     }
 }
 
 mod tests {
+    use super::*;
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn roll_dice_with_invalid_player_raises() {
+        let mut state = GameState::init();
+        let result = state.apply(Action::RollDice(PlayerId(0), RollResult(1, 2)));
+        assert_eq!(
+            result,
+            Err(StateError::new("player 0 is not a valid player"))
+        );
+    }
+
+    #[test]
+    fn roll_dice_with_valid_player_logs_roll() {
+        let mut state = GameState::init();
+        let id = PlayerId(0);
+        state.players.push(Player { id });
+        let result = state.apply(Action::RollDice(id, RollResult(1, 2)));
+        assert_eq!(result, Ok(()));
+        assert_eq!(state.events, [Action::RollDice(id, RollResult(1, 2))]);
     }
 }
 
